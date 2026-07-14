@@ -140,8 +140,11 @@ export default function MapView({
   }
 
   return (
-    <div className="h-dvh w-full overflow-hidden bg-zinc-900 text-zinc-100">
-      <div ref={mapNode} className="absolute inset-0" />
+    <div className="relative h-dvh w-full overflow-hidden bg-zinc-900 text-zinc-100">
+      {/* Sized, not absolutely positioned: maplibre-gl.css sets `.maplibregl-map
+          { position: relative }` and, loading after Tailwind, it overrides an
+          `absolute` utility — which collapsed the container to height 0. */}
+      <div ref={mapNode} className="h-full w-full" />
 
       <aside className="absolute left-0 top-0 z-10 flex h-full w-80 max-w-[85vw] flex-col gap-3 overflow-y-auto bg-zinc-950/85 p-5 backdrop-blur">
         <header>
