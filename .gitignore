@@ -45,3 +45,6 @@ coverage/
 Thumbs.db
 .vercel
 .env*.local
+
+# Local photo folders used for ingest testing (never commit photos)
+test-photos/
