@@ -1,0 +1,201 @@
+TRAVEL PHOTOMAP — INITIAL BUILD
+Session date: 2026-07-14
+Live: https://photomap-theta.vercel.app
+Repo: github.com/Vainglorious/photomap (main; Vercel auto-deploys on push)
+
+
+WHAT WE SET OUT TO DO
+---------------------
+Build a world map where a *collection* of photos is pinned at a user-chosen
+location. Click a pin -> slideshow of that collection, captions underneath,
+editable. Collections sortable by date. Reference: flippinfreeflapjacks.com.
+
+Ended the session with: the map live, the upload pipeline working end to end,
+and a 3-photo test collection successfully pinned on Osaka.
+
+
+WHAT WE LEARNED BY LOOKING AT THE REAL DATA
+-------------------------------------------
+Rather than trust the brief, we fetched the reference site and both Dropbox
+folders and inspected them. Several assumptions turned out to be wrong.
+
+1. It is NOT ~50 photos. It is 166 files, ~1.05 GB.
+     Folder A (World Expo Osaka): 144 files, 872 MB
+       -> 135 jpg + 4 heic + 3 .mov + 1 .txt
+     Folder B (Hong Kong):        22 files, 178 MB
+       -> 20 jpg + 2 heic
+   Every storage/timeout decision below follows from this.
+
+2. Filenames are the titles, and the leading NUMBER IS RUNNING ORDER, not a date.
+   Photo 1 in folder A is the Expo entrance; 114 is near the exit. It is a
+   curated walkthrough. Consequence: "sort by date" is a property of
+   COLLECTIONS (pins), not of photos within a collection. Sorting a
+   collection's photos by date would scramble a story that was deliberately
+   sequenced.
+
+     Folder A:  "1-Expo entrance with Myaku Myaku Mascot....jpg"   number + "-" + caption
+                "57b-Algae x Hello Kitty.jpg"                      sub-index "57b"
+                "6.jpg"                                            number, NO caption
+                "z-singular cucumber.jpg"                          no number
+                "2025-08-01 16.21.56.jpg"                          raw camera name
+     Folder B:  "11 Noah's Ark.jpg"                                number + SPACE + caption
+                "13.jpg" AND "13-2.jpg"                            numeric sub-index
+
+3. Roughly a third of the photos have NO caption at all (bare 6.jpg, 16.jpg...).
+   So a caption must be optional and easy to add later. We never show "6" as a
+   title -- uncaptioned photos display "Add a description..." instead.
+
+4. NO GPS in any photo. Confirmed the EXIF GPS block is absent everywhere.
+   This is also the intended product behaviour, per Adil: individual photos are
+   NOT geotagged and we will never infer location from them. The pin is a single
+   user-chosen property of the collection. There is no EXIF-GPS code in this
+   project by design.
+
+5. EXIF DateTimeOriginal IS present and correct (Sony ILCE-7, iPhone 13 Pro).
+   Used only to PRE-FILL the collection date field. A suggestion, never truth.
+
+6. 6 HEIC files exist. No browser renders HEIC natively (Safari aside). They
+   must be transcoded at ingest or those photos silently break.
+
+7. 3 .mov videos in folder A. Out of scope for v1; ingest reports them as
+   skipped rather than dropping them silently.
+
+8. The reference site runs MapLibre GL + Protomaps/PMTiles + GeoJSON.
+   Free basemap, no API key, no per-view billing.
+
+
+DECISIONS MADE (Adil chose these)
+---------------------------------
+Metadata store ...... single manifest.json in Vercel Blob (NOT Postgres)
+Originals ........... NOT stored. Derivatives only (2048px web + 400px thumb
+                      webp). ~55 MB for both collections vs 1.05 GB of
+                      originals -- 20x lighter, fits the 1 GB free tier.
+                      Originals stay safe in Dropbox.
+Write access ........ fully public. No auth gate in v1.
+Videos .............. skipped, with an explicit report at ingest.
+Captions ............ filename text when it contains words; blank-but-editable
+                      when the name is only a number or camera timestamp.
+Photo order ......... filename number, NOT date.
+
+RISK FLAGGED + MITIGATED: "manifest.json" + "public writes" are each fine alone
+but dangerous together -- a whole-file-rewrite metadata store with
+unauthenticated writes means one careless or hostile visitor can clobber EVERY
+collection's captions at once, unrecoverably. Mitigation built in:
+
+  manifest/rev/<iso>.json   immutable revision, written on every change, kept forever
+  manifest/latest.json      pointer to the current revision
+
+Rollback = repoint latest.json at an older revision. `npm run revisions` lists
+them; `npm run revisions -- --rollback <key>` restores one.
+
+
+ARCHITECTURE
+------------
+Next.js 16 (App Router) on Vercel · MapLibre GL · Vercel Blob · Tailwind v4
+
+The load-bearing decision: THE BROWSER DOES THE IMAGE WORK.
+A Vercel serverless function cannot download an 872 MB zip, unpack it,
+transcode ~139 images and upload them -- it blows the execution-time limit, the
+memory limit and the 512 MB /tmp limit simultaneously. So instead:
+
+  browser: decode -> resize -> webp encode -> upload straight to Blob
+  server:  mints a short-lived client token; metadata only; never sees the bytes
+
+This also means NO BLOB CREDENTIAL IS EVER NEEDED OUTSIDE PROD, which neatly
+solved a problem we hit (below).
+
+Files:
+  lib/filename.ts     parses order/sub-index/caption out of a filename
+  lib/imaging.ts      browser pipeline: decode (incl. HEIC via wasm) -> 2048px web + 400px thumb
+  lib/manifest.ts     versioned manifest read/write + rollback
+  lib/basemap.ts      CARTO raster tiles (no API key)
+  lib/types.ts        Collection / Photo / Manifest
+  components/MapView.tsx        map, pins, sidebar, date sort, click-to-place pin
+  components/Slideshow.tsx      lightbox in author order, inline caption editing
+  components/AddCollection.tsx  the upload flow
+  app/api/upload/route.ts       mints Blob client tokens (scoped to photo paths only)
+  app/api/collection/route.ts   records a collection after upload
+  app/api/caption/route.ts      edits one caption; cannot create/delete anything
+  scripts/ingest.ts             local seeding script (kept, but unused -- needs a local token)
+  scripts/revisions.ts          list/rollback manifest revisions
+
+
+BUGS FOUND AND FIXED
+--------------------
+1. FILENAME PARSER: "2025-08-01 16.21.56.jpg" naively parsed as order 2025.
+   Camera-default names (timestamps, IMG_/DSC_/PXL_) are now detected FIRST and
+   sorted last with no caption.
+
+2. FILENAME PARSER: folder B has both "13.jpg" and "13-2.jpg", which collided
+   on order 13. Added zero-padded numeric sub-indexes. All 166 real filenames
+   now parse with zero collisions.
+
+3. THE MAP DIDN'T RENDER (looked like "no map at all").
+   Cause was CSS, not tiles. maplibre-gl.css sets
+     .maplibregl-map { position: relative }
+   and because it's imported from the component it loads AFTER Tailwind and
+   overrode the `absolute inset-0` utility on the container. The div fell back
+   into normal flow with no height, the canvas took its default 300px, and the
+   basemap was drawn in a sliver hidden behind the sidebar. Tiles were loading
+   fine the whole time (verified: 24/24 OK).
+   Fix: size the container instead of positioning it -- wrapper is
+   `relative h-dvh`, map fills it with `h-full w-full`.
+   Caught by driving a real headless browser against the page and reading the
+   container's computed height. Would not have been caught by typecheck/build.
+
+
+THE BLOB TOKEN DETOUR (worth remembering)
+-----------------------------------------
+`vercel env pull` returned BLOB_READ_WRITE_TOKEN with an EMPTY value. This is
+not a bug: Vercel marks Blob tokens as "Sensitive", and sensitive env vars are
+write-only -- they will never come down via env pull. That is also why the
+dashboard wouldn't let Adil copy it.
+
+Resolved by not needing it at all: the browser-upload architecture means the
+token only ever has to exist in prod, where Vercel already injects it.
+(.vercel/ also held only repo.json -- a repo-level link, not a project link.)
+
+
+DROPBOX-LINK INGEST: DROPPED (for now)
+--------------------------------------
+Both shared folders ARE publicly downloadable as a zip by appending dl=1 -- no
+OAuth, no API key. Verified. But:
+  - a browser can't fetch that zip (Dropbox sends no CORS headers), and
+  - an 872 MB zip can't pass through a Vercel function.
+So the paste-a-link feature can't work with the current architecture. Adil's
+call: don't fight the CORS battle. Folder upload only for now.
+Revisit if it matters -- it would need a streaming/chunked server ingest.
+
+
+VERIFIED WORKING (end of session)
+---------------------------------
+Created test-photos/ (gitignored) with 3 deliberately chosen files exercising
+all three code paths:
+  "1-Expo entrance...jpg"        captioned jpg
+  "6.jpg"                        uncaptioned jpg
+  "35-Switzerland Pavillion.heic" HEIC -- the one most likely to break
+
+Uploaded through the live site. It worked: pin landed on Osaka, slideshow
+opened in filename order, HEIC displayed, uncaptioned photo showed
+"Add a description..." rather than "6".
+
+
+WHERE WE LEFT OFF / NEXT
+------------------------
+[ ] Ingest the full Osaka folder (139 photos) through the live UI.
+    Unpacked and ready at:
+      <scratchpad>/World Expo Osaka
+    Expect a few minutes -- the browser transcodes 139 x 4032px photos.
+    Pin: Yumeshima, ~34.6516, 135.3860. Date from EXIF: 2025-07-31.
+[ ] Then Hong Kong (22 photos) as the second test.
+    Pin candidate: Peng Chau ~22.2833, 114.0333 -- "Fong Yuen Study Hall" is on
+    Peng Chau, but "Noah's Ark" is over on Ma Wan, so Adil should confirm.
+    Date from EXIF: 2024-11-29.
+[ ] Timeline / date-range filter on the map (sidebar sort exists; filter doesn't).
+[ ] Decide whether videos and the Dropbox-link path ever come back.
+[ ] Rate-limit the write routes (public writes, currently unthrottled).
+
+Correction to photomapplan.md worth carrying: the plan proposed self-hosting
+Protomaps PMTiles in Blob like the reference site. That works for one city, but
+a WORLD basemap PMTiles file is ~100 GB -- nowhere near the 1 GB Blob tier.
+We use CARTO raster tiles instead: still no API key, still free.
