@@ -12,15 +12,92 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+body {
+  font-family: var(--font-sans), system-ui, sans-serif;
+  overflow: hidden; /* the map owns the viewport */
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* --- Map pins ---------------------------------------------------------- */
+/* A pin is a photo, not a teardrop: the cover thumbnail is the marker. */
+
+.pin {
+  position: relative;
+  display: block;
+  cursor: pointer;
+  border: 0;
+  padding: 0;
+  background: none;
+  transition: transform 0.15s ease;
+}
+
+.pin:hover,
+.pin:focus-visible {
+  transform: scale(1.08);
+  z-index: 10;
+  outline: none;
+}
+
+.pin-img {
+  display: block;
+  width: 56px;
+  height: 56px;
+  border-radius: 10px;
+  border: 3px solid #fff;
+  background-color: #3f3f46;
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.35);
+}
+
+/* The little stem that makes it read as "pinned here" rather than "floating". */
+.pin-img::after {
+  content: "";
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  background: #fff;
+  transform: translateX(-50%) rotate(45deg);
+  border-radius: 2px;
+}
+
+.pin-count {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  min-width: 20px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.3);
+}
+
+.pin-label {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 140px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgb(9 9 11 / 0.85);
+  color: #fafafa;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* MapLibre's default controls are light; tone them into the dark UI. */
+.maplibregl-ctrl-attrib {
+  font-size: 10px;
 }
