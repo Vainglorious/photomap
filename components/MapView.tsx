@@ -7,6 +7,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { basemapStyle } from "@/lib/basemap";
 import type { Collection } from "@/lib/types";
 import Slideshow from "./Slideshow";
+import AddCollection from "./AddCollection";
 
 type SortDir = "newest" | "oldest";
 
@@ -29,6 +30,12 @@ export default function MapView({
   const [openId, setOpenId] = useState<string | null>(null);
   const [sort, setSort] = useState<SortDir>("newest");
   const [live, setLive] = useState<Collection[]>(collections);
+
+  const [adding, setAdding] = useState(false);
+  const [placing, setPlacing] = useState(false);
+  const [draftPin, setDraftPin] = useState<{ lat: number; lng: number } | null>(null);
+  const draftMarker = useRef<maplibregl.Marker | null>(null);
+  const placingRef = useRef(false);
 
   const sorted = useMemo(() => {
     const c = [...live];
@@ -53,11 +60,45 @@ export default function MapView({
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     mapRef.current = map;
 
+    // Registered once. A ref (not state) carries the current mode, so the handler
+    // never goes stale and the map is never torn down mid-session.
+    map.on("click", (e) => {
+      if (!placingRef.current) return;
+      setDraftPin({ lat: e.lngLat.lat, lng: e.lngLat.lng });
+      setPlacing(false);
+    });
+
     return () => {
       map.remove();
       mapRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    placingRef.current = placing;
+    const canvas = mapRef.current?.getCanvas();
+    if (canvas) canvas.style.cursor = placing ? "crosshair" : "";
+  }, [placing]);
+
+  // The draft pin the user is placing, shown before the collection exists.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    draftMarker.current?.remove();
+    draftMarker.current = null;
+
+    if (draftPin && adding) {
+      draftMarker.current = new maplibregl.Marker({ color: "#10b981", draggable: true })
+        .setLngLat([draftPin.lng, draftPin.lat])
+        .addTo(map);
+
+      draftMarker.current.on("dragend", () => {
+        const { lat, lng } = draftMarker.current!.getLngLat();
+        setDraftPin({ lat, lng });
+      });
+    }
+  }, [draftPin, adding]);
 
   // Rebuild pins whenever the collections change.
   useEffect(() => {
@@ -115,9 +156,31 @@ export default function MapView({
           <p className="rounded-md bg-amber-500/15 p-3 text-xs leading-relaxed text-amber-200">{loadError}</p>
         )}
 
-        {live.length === 0 && !loadError && (
+        {adding ? (
+          <AddCollection
+            pin={draftPin}
+            placing={placing}
+            onPlacePin={() => setPlacing(true)}
+            onCreated={(c) => setLive((prev) => [...prev, c])}
+            onClose={() => {
+              setAdding(false);
+              setPlacing(false);
+              setDraftPin(null);
+            }}
+          />
+        ) : (
+          <button
+            onClick={() => setAdding(true)}
+            className="rounded-md bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 hover:bg-white"
+          >
+            + Add a collection
+          </button>
+        )}
+
+        {live.length === 0 && !loadError && !adding && (
           <p className="text-sm text-zinc-400">
-            No collections yet. Seed one with <code className="text-zinc-200">npm run ingest</code>.
+            No collections yet. Add one — name it, date it, click the map to drop its pin, and choose a folder of
+            photos.
           </p>
         )}
 
