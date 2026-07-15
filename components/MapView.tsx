@@ -210,7 +210,13 @@ export default function MapView({
               pin={draftPin}
               placing={placing}
               onPlacePin={() => setPlacing(true)}
-              onCreated={(c) => setLive((prev) => [...prev, c])}
+              onCreated={(c) => {
+                setLive((prev) => [...prev, c]);
+                // Remove the green draft pin now, or it overlays the new real pin
+                // and swallows clicks until a refresh.
+                setPlacing(false);
+                setDraftPin(null);
+              }}
               onClose={() => {
                 setAdding(false);
                 setPlacing(false);
