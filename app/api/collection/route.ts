@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/dal";
-import { createCollection, type IncomingPhoto } from "@/lib/collections";
+import { createCollection, deleteCollectionOwned, type IncomingPhoto } from "@/lib/collections";
 
 /**
  * Records a collection after the browser has uploaded every derivative. Only
@@ -56,5 +56,22 @@ export async function POST(req: Request) {
       { error: e instanceof Error ? e.message : "Could not save the collection" },
       { status: 500 },
     );
+  }
+}
+
+/** Deletes one of the caller's own collections: /api/collection?id=<collectionId> */
+export async function DELETE(req: Request) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "You must be logged in." }, { status: 401 });
+
+  const id = new URL(req.url).searchParams.get("id");
+  if (!id) return NextResponse.json({ error: "A collection id is required" }, { status: 400 });
+
+  try {
+    const ok = await deleteCollectionOwned(session.userId, id);
+    if (!ok) return NextResponse.json({ error: "No such collection, or not yours to delete" }, { status: 404 });
+    return NextResponse.json({ ok: true });
+  } catch {
+    return NextResponse.json({ error: "Delete failed" }, { status: 500 });
   }
 }

@@ -181,6 +181,20 @@ export async function createCollection(
  * Edits one caption, but only if the photo belongs to a collection `userId` owns.
  * Returns false when the photo doesn't exist or isn't theirs (no leakage of which).
  */
+/**
+ * Deletes a collection (and its photos, via the ON DELETE CASCADE foreign key),
+ * but only if `userId` owns it. Returns false when it doesn't exist or isn't theirs.
+ * The image files in Blob are left as-is — orphaned derivatives are cheap and
+ * harmless, and never removing bytes keeps this operation simple and reversible-ish.
+ */
+export async function deleteCollectionOwned(userId: string, collectionId: string): Promise<boolean> {
+  const rows = (await sql.query(
+    `delete from collections where id = $1 and user_id = $2 returning id`,
+    [collectionId, userId],
+  )) as { id: string }[];
+  return rows.length > 0;
+}
+
 export async function updateCaptionOwned(
   userId: string,
   collectionId: string,

@@ -42,6 +42,7 @@ export default function MapView({
   const [live, setLive] = useState<Collection[]>(collections);
 
   const [adding, setAdding] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [placing, setPlacing] = useState(false);
   const [draftPin, setDraftPin] = useState<{ lat: number; lng: number } | null>(null);
   const draftMarker = useRef<maplibregl.Marker | null>(null);
@@ -139,6 +140,25 @@ export default function MapView({
     mapRef.current?.flyTo({ center: [c.lng, c.lat], zoom: 9, speed: 1.2 });
   }
 
+  async function handleDelete(c: Collection) {
+    if (!isOwner || deletingId) return;
+    if (!confirm(`Delete “${c.name}”? This removes the collection and its ${c.photos.length} photo${c.photos.length === 1 ? "" : "s"}. This can’t be undone.`)) {
+      return;
+    }
+
+    setDeletingId(c.id);
+    try {
+      const res = await fetch(`/api/collection?id=${encodeURIComponent(c.id)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? `Failed (${res.status})`);
+      setLive((prev) => prev.filter((x) => x.id !== c.id));
+      if (openId === c.id) setOpenId(null);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not delete the collection.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   function handleCaptionSaved(collectionId: string, photoId: string, caption: string) {
     setLive((prev) =>
       prev.map((c) =>
@@ -230,25 +250,41 @@ export default function MapView({
           {sorted.map((c) => {
             const cover = c.photos.find((p) => p.id === c.coverPhotoId) ?? c.photos[0];
             return (
-              <li key={c.id}>
+              <li key={c.id} className="group relative">
                 <button
                   onClick={() => {
                     flyTo(c);
-                    setOpenId(c.id);
+                    if (c.photos.length) setOpenId(c.id);
                   }}
-                  className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-zinc-800/70"
+                  className={`flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-zinc-800/70 ${isOwner ? "pr-9" : ""}`}
                 >
-                  {cover && (
+                  {cover ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={cover.thumbUrl} alt="" className="h-12 w-12 shrink-0 rounded-md object-cover" />
+                  ) : (
+                    <span className="grid h-12 w-12 shrink-0 place-items-center rounded-md bg-zinc-800 text-zinc-600">
+                      —
+                    </span>
                   )}
                   <span className="min-w-0">
                     <span className="block truncate text-sm font-medium">{c.name}</span>
                     <span className="block text-xs text-zinc-400">
-                      {formatDate(c.date)} · {c.photos.length} photos
+                      {formatDate(c.date)} · {c.photos.length} photo{c.photos.length === 1 ? "" : "s"}
                     </span>
                   </span>
                 </button>
+
+                {isOwner && (
+                  <button
+                    onClick={() => handleDelete(c)}
+                    disabled={deletingId === c.id}
+                    aria-label={`Delete ${c.name}`}
+                    title="Delete collection"
+                    className="absolute right-1 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-md text-zinc-500 opacity-0 hover:bg-red-500/15 hover:text-red-400 focus:opacity-100 group-hover:opacity-100 disabled:opacity-50"
+                  >
+                    {deletingId === c.id ? "…" : "🗑"}
+                  </button>
+                )}
               </li>
             );
           })}
