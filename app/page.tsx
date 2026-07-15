@@ -1,20 +1,38 @@
-import MapView from "@/components/MapView";
-import { readManifest } from "@/lib/manifest";
-import { EMPTY_MANIFEST } from "@/lib/types";
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { getSession } from "@/lib/dal";
 
-// Metadata lives in Blob and changes on every caption edit — never prerender it.
+// Reads the session cookie; never prerender.
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  let manifest = EMPTY_MANIFEST;
-  let loadError: string | null = null;
+  const session = await getSession();
+  if (session) redirect(session.username ? `/${session.username}` : "/welcome");
 
-  try {
-    manifest = await readManifest();
-  } catch (e) {
-    // A missing token or empty store shouldn't blank the page — the map still renders.
-    loadError = e instanceof Error ? e.message : "Could not load collections.";
-  }
+  return (
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-8 bg-zinc-950 p-6 text-center text-zinc-100">
+      <div className="max-w-xl">
+        <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">Travel PhotoMap</h1>
+        <p className="mt-4 text-lg text-zinc-400">
+          Pin your photo collections to a world map. Click a pin, walk through the trip. Your map lives at
+          your own <span className="text-zinc-200">/username</span>.
+        </p>
+      </div>
 
-  return <MapView collections={manifest.collections} loadError={loadError} />;
+      <div className="flex flex-col items-center gap-3 sm:flex-row">
+        <Link
+          href="/signup"
+          className="rounded-lg bg-emerald-500 px-6 py-3 text-sm font-semibold text-zinc-950 hover:bg-emerald-400"
+        >
+          Get started
+        </Link>
+        <Link
+          href="/login"
+          className="rounded-lg border border-zinc-700 px-6 py-3 text-sm font-medium text-zinc-100 hover:bg-zinc-900"
+        >
+          Log in
+        </Link>
+      </div>
+    </main>
+  );
 }

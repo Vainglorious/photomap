@@ -1,0 +1,123 @@
+TRAVEL PHOTOMAP — LOGIN FLOW / MULTI-USER
+Session date: 2026-07-15
+
+
+WHAT WE SET OUT TO DO
+---------------------
+Add a login flow and turn the single global map into per-user maps:
+  - sign up with Google OR email/password
+  - after signup, pick a username (<=12 chars) in a modal
+  - each user's map lives at /<username> (with the same #zoom/lat/lng hash)
+
+
+DECISIONS MADE (Adil chose these)
+---------------------------------
+Auth stack ......... ROLL OUR OWN. No NextAuth/Better Auth — this Next.js is a
+                     modified 16.2.10 and libraries that hook deep into Next
+                     internals are a risk. jose + zod were already installed,
+                     which is exactly the stack the bundled Next auth guide uses.
+                       - sessions: stateless signed JWT (jose) in an httpOnly cookie
+                       - passwords: scrypt via node:crypto (no bcrypt/argon native dep)
+                       - Google: manual OAuth 2.0 authorization-code flow, id_token
+                         verified against Google's JWKS with jose
+Data model ......... Collections MOVED into Postgres (Neon). Blob now stores only
+                     image files. users / collections / photos tables. The old
+                     Blob manifest.json is no longer the source of truth.
+Root (/) ........... Landing + login page. Logged-in users are redirected to their
+                     map (or /welcome if they haven't picked a username).
+Old test data ...... The 3-photo Osaka test collection in the old manifest was
+                     throwaway — discarded, fresh start. (Blob files still exist
+                     but nothing reads the manifest now.)
+
+
+THE FRAMEWORK GOTCHA THAT SHAPED EVERYTHING
+-------------------------------------------
+This Next.js (16.2.10) renamed the `middleware` file convention to `proxy`.
+  - proxy.ts (root), exports `proxy(request)` and `config.matcher`
+  - defaults to the Node.js runtime now, so jose works inside it
+We read node_modules/next/dist/docs before writing code (per AGENTS.md) and
+confirmed: server actions + useActionState, async `params: Promise<{...}>`,
+async `cookies()`. All used as documented.
+
+
+ARCHITECTURE / NEW FILES
+------------------------
+DB + auth libs:
+  lib/db.ts            Neon HTTP client. NOTE: the neon() tagged template turns
+                       interpolations into bound params, so it CANNOT compose SQL
+                       fragments. The data layer uses sql.query(text, params)
+                       with a shared column-list string instead. Still injection-safe.
+  lib/session.ts       jose encrypt/decrypt + cookie name. No next/headers, no DB,
+                       so proxy.ts can import it safely.
+  lib/dal.ts           'server-only'. createSession/deleteSession/getSession/
+                       getCurrentUser via next/headers cookies(). cache()'d per request.
+  lib/password.ts      scrypt hash/verify (format: scrypt$<salt>$<hash>).
+  lib/google.ts        getGoogleAuthUrl / exchangeCode (verifies id_token via JWKS).
+  lib/users.ts         user queries; upsertGoogleUser links Google onto an existing
+                       email account; setUsername throws UsernameTakenError on 23505.
+  lib/collections.ts   Postgres replacement for the manifest: list/create/updateCaption.
+                       Ownership is enforced IN the caption UPDATE's WHERE clause.
+  lib/validation.ts    zod schemas. USERNAME rules: 3–12 chars [a-z0-9_], lowercased,
+                       plus a RESERVED_USERNAMES set (api, login, welcome, ...).
+
+Auth flow:
+  app/actions/auth.ts             signup / login / logout / chooseUsername (server actions)
+  app/login, app/signup           pages -> components/auth/AuthForm.tsx (client)
+  app/welcome                     pick-a-username -> components/UsernameModal.tsx
+                                    (live availability via /api/username/check)
+  app/api/auth/google/route.ts    start OAuth (state cookie for CSRF)
+  app/api/auth/google/callback    verify state -> exchange -> upsert -> session
+  app/api/username/check          debounced availability endpoint
+
+Routing:
+  proxy.ts                        optimistic redirects (cookie only, no DB):
+                                    logged-in away from /login,/signup; /welcome guard
+  app/page.tsx                    landing (redirects logged-in users onward)
+  app/[username]/page.tsx         the per-user map; public; sets isOwner
+
+Reworked:
+  app/api/collection  -> creates under session.userId (was: manifest write, public)
+  app/api/caption     -> owner-only, ownership checked in SQL (was: public, queued)
+  app/api/upload      -> requires a session before minting a Blob client token
+  MapView / Slideshow -> take ownerName/ownerUsername/isOwner; add + caption-edit
+                         are owner-only; visitors see the map read-only; owner has Log out.
+
+DB:
+  scripts/schema.sql + scripts/migrate.ts  ->  npm run migrate   (idempotent)
+
+
+VERIFIED (end of session)
+-------------------------
+npm run build passes; tsc clean. Migration applied to Neon.
+Drove a real headless browser through the whole flow — 17/17 checks green:
+  signup -> /welcome modal -> live availability -> reserved handle blocked ->
+  choose username -> /<username> -> owner sees Add + Log out -> session survives
+  reload -> logged-in user bounced off /login -> visitor sees map read-only (no
+  Add/Log out) -> unknown username 404 -> logout -> login -> wrong password error.
+Confirmed rows in Postgres (username + password_hash set), then deleted the test users.
+
+
+ENV (added to .env.local; documented in .env.example)
+-----------------------------------------------------
+DATABASE_URL / DATABASE_URL_UNPOOLED   Neon (unpooled used by migrate)
+SESSION_SECRET                          openssl rand -base64 32 (already generated)
+GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET EMPTY — see below
+APP_URL                                 empty locally (derives origin); set in prod
+
+
+WHERE WE LEFT OFF / NEXT
+------------------------
+[ ] Google sign-in is built but DISABLED until credentials exist. To enable:
+      create an OAuth client at console.cloud.google.com/apis/credentials,
+      authorized redirect URI (dev): http://localhost:3000/api/auth/google/callback
+      (prod: https://<domain>/api/auth/google/callback),
+      put the id/secret in .env.local, and set the same vars + APP_URL on Vercel.
+    The "Continue with Google" button auto-appears once configured.
+[ ] Set DATABASE_URL, SESSION_SECRET, (GOOGLE_*), APP_URL in the Vercel project,
+    and run `npm run migrate` against the prod DB (same command, prod DATABASE_URL).
+[ ] Legacy/now-unused: lib/manifest.ts, scripts/ingest.ts, scripts/revisions.ts,
+    npm run ingest/revisions. They still compile but write to the old manifest,
+    which nothing reads anymore. Delete or rewrite for Postgres when convenient.
+[ ] Rate-limit the auth + write routes (signup/login/collection are unthrottled).
+[ ] Product polish: account/settings page, change-username, email verification,
+    password reset — none built yet.

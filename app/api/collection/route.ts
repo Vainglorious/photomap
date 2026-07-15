@@ -1,24 +1,14 @@
 import { NextResponse } from "next/server";
-import { randomUUID } from "node:crypto";
-import { readManifest, writeManifest } from "@/lib/manifest";
-import { comparePhotos, type Collection, type Photo } from "@/lib/types";
+import { getSession } from "@/lib/dal";
+import { createCollection, type IncomingPhoto } from "@/lib/collections";
 
 /**
- * Records a collection after the browser has uploaded every derivative.
- * Only metadata crosses this route — a few KB of JSON, never image bytes.
+ * Records a collection after the browser has uploaded every derivative. Only
+ * metadata crosses this route — a few KB of JSON, never image bytes.
+ *
+ * Writes are now scoped to the signed-in user: the collection is created under
+ * their account and shows up only on their /<username> map.
  */
-
-interface IncomingPhoto {
-  webUrl: string;
-  thumbUrl: string;
-  caption: string;
-  order: number;
-  orderSuffix: string;
-  takenAt: string | null;
-  width: number;
-  height: number;
-  originalFilename: string;
-}
 
 const BLOB_HOST = /\.public\.blob\.vercel-storage\.com$/;
 
@@ -32,6 +22,9 @@ function isOurBlob(url: string): boolean {
 }
 
 export async function POST(req: Request) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "You must be logged in." }, { status: 401 });
+
   let body: { name?: string; date?: string; lat?: number; lng?: number; photos?: IncomingPhoto[] };
   try {
     body = await req.json();
@@ -55,37 +48,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Photo URLs must point at this app's Blob store" }, { status: 400 });
   }
 
-  const built: Photo[] = photos.map((p) => ({
-    id: randomUUID(),
-    webUrl: p.webUrl,
-    thumbUrl: p.thumbUrl,
-    caption: (p.caption ?? "").slice(0, 500),
-    order: p.order,
-    orderSuffix: p.orderSuffix ?? "",
-    takenAt: p.takenAt ?? null,
-    width: p.width,
-    height: p.height,
-    originalFilename: p.originalFilename,
-  }));
-
-  built.sort(comparePhotos);
-
-  const collection: Collection = {
-    id: randomUUID(),
-    name: name.trim().slice(0, 120),
-    date,
-    lat,
-    lng,
-    coverPhotoId: built[0]?.id ?? null,
-    photos: built,
-    createdAt: new Date().toISOString(),
-  };
-
-  const manifest = await readManifest();
-  const rev = await writeManifest(
-    { ...manifest, collections: [...manifest.collections, collection] },
-    new Date().toISOString(),
-  );
-
-  return NextResponse.json({ collection, rev });
+  try {
+    const collection = await createCollection(session.userId, { name, date, lat, lng, photos });
+    return NextResponse.json({ collection });
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : "Could not save the collection" },
+      { status: 500 },
+    );
+  }
 }

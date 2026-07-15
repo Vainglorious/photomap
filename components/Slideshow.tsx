@@ -12,10 +12,13 @@ import type { Collection } from "@/lib/types";
  */
 export default function Slideshow({
   collection,
+  canEdit,
   onClose,
   onCaptionSaved,
 }: {
   collection: Collection;
+  /** Only the map's owner may edit captions. Visitors see them read-only. */
+  canEdit: boolean;
   onClose: () => void;
   onCaptionSaved: (collectionId: string, photoId: string, caption: string) => void;
 }) {
@@ -172,7 +175,7 @@ export default function Slideshow({
             </div>
             {saveError && <p className="mt-2 text-xs text-red-400">{saveError}</p>}
           </div>
-        ) : (
+        ) : canEdit ? (
           <button
             onClick={startEditing}
             className="mx-auto block max-w-2xl rounded-md px-3 py-1.5 text-left hover:bg-zinc-900"
@@ -184,6 +187,9 @@ export default function Slideshow({
               <span className="text-zinc-500 italic">Add a description…</span>
             )}
           </button>
+        ) : (
+          // Visitor: captions are read-only; an empty one simply shows nothing.
+          photo.caption && <p className="mx-auto max-w-2xl px-3 py-1.5 text-zinc-100">{photo.caption}</p>
         )}
       </footer>
     </div>

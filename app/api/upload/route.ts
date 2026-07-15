@@ -1,5 +1,6 @@
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { NextResponse } from "next/server";
+import { getSession } from "@/lib/dal";
 
 /**
  * Mints short-lived client tokens so the browser can upload derivatives straight
@@ -7,12 +8,15 @@ import { NextResponse } from "next/server";
  * point: an 872 MB folder cannot fit through a serverless request.
  *
  * The store's real BLOB_READ_WRITE_TOKEN stays on the server and is never sent
- * to the browser.
+ * to the browser. Only logged-in users can mint a token.
  */
 
 const ALLOWED = /^photos\/[0-9a-f-]{36}-(web|thumb)\.webp$/;
 
 export async function POST(request: Request): Promise<NextResponse> {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "You must be logged in." }, { status: 401 });
+
   const body = (await request.json()) as HandleUploadBody;
 
   try {
@@ -20,8 +24,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       body,
       request,
       onBeforeGenerateToken: async (pathname) => {
-        // Writes are public by decision (§6), but a client token should still only
-        // ever be able to create a photo derivative — not overwrite the manifest.
+        // A client token should only ever be able to create a photo derivative.
         if (!ALLOWED.test(pathname)) {
           throw new Error(`Refusing to issue a token for "${pathname}"`);
         }

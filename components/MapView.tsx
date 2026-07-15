@@ -6,6 +6,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 import { basemapStyle } from "@/lib/basemap";
 import type { Collection } from "@/lib/types";
+import { logout } from "@/app/actions/auth";
 import Slideshow from "./Slideshow";
 import AddCollection from "./AddCollection";
 
@@ -19,9 +20,18 @@ function formatDate(iso: string): string {
 export default function MapView({
   collections,
   loadError,
+  ownerName,
+  ownerUsername,
+  isOwner,
 }: {
   collections: Collection[];
   loadError: string | null;
+  /** Display name of the map's owner (falls back to the username). */
+  ownerName: string;
+  /** The owner's handle — the /<username> this map lives at. */
+  ownerUsername: string;
+  /** True when the signed-in viewer owns this map: only then can they add/edit. */
+  isOwner: boolean;
 }) {
   const mapNode = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -147,43 +157,60 @@ export default function MapView({
       <div ref={mapNode} className="h-full w-full" />
 
       <aside className="absolute left-0 top-0 z-10 flex h-full w-80 max-w-[85vw] flex-col gap-3 overflow-y-auto bg-zinc-950/85 p-5 backdrop-blur">
-        <header>
-          <h1 className="text-lg font-semibold tracking-tight">Travel PhotoMap</h1>
-          <p className="text-sm text-zinc-400">
-            {live.length} {live.length === 1 ? "collection" : "collections"} ·{" "}
-            {live.reduce((n, c) => n + c.photos.length, 0)} photos
-          </p>
+        <header className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h1 className="truncate text-lg font-semibold tracking-tight">
+              {isOwner ? "Your PhotoMap" : `${ownerName}’s PhotoMap`}
+            </h1>
+            <p className="text-sm text-zinc-400">
+              <span className="text-zinc-500">/{ownerUsername}</span> · {live.length}{" "}
+              {live.length === 1 ? "collection" : "collections"} ·{" "}
+              {live.reduce((n, c) => n + c.photos.length, 0)} photos
+            </p>
+          </div>
+          {isOwner && (
+            <form action={logout}>
+              <button
+                type="submit"
+                className="shrink-0 rounded-md px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+              >
+                Log out
+              </button>
+            </form>
+          )}
         </header>
 
         {loadError && (
           <p className="rounded-md bg-amber-500/15 p-3 text-xs leading-relaxed text-amber-200">{loadError}</p>
         )}
 
-        {adding ? (
-          <AddCollection
-            pin={draftPin}
-            placing={placing}
-            onPlacePin={() => setPlacing(true)}
-            onCreated={(c) => setLive((prev) => [...prev, c])}
-            onClose={() => {
-              setAdding(false);
-              setPlacing(false);
-              setDraftPin(null);
-            }}
-          />
-        ) : (
-          <button
-            onClick={() => setAdding(true)}
-            className="rounded-md bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 hover:bg-white"
-          >
-            + Add a collection
-          </button>
-        )}
+        {isOwner &&
+          (adding ? (
+            <AddCollection
+              pin={draftPin}
+              placing={placing}
+              onPlacePin={() => setPlacing(true)}
+              onCreated={(c) => setLive((prev) => [...prev, c])}
+              onClose={() => {
+                setAdding(false);
+                setPlacing(false);
+                setDraftPin(null);
+              }}
+            />
+          ) : (
+            <button
+              onClick={() => setAdding(true)}
+              className="rounded-md bg-zinc-100 px-3 py-2 text-sm font-medium text-zinc-900 hover:bg-white"
+            >
+              + Add a collection
+            </button>
+          ))}
 
         {live.length === 0 && !loadError && !adding && (
           <p className="text-sm text-zinc-400">
-            No collections yet. Add one — name it, date it, click the map to drop its pin, and choose a folder of
-            photos.
+            {isOwner
+              ? "No collections yet. Add one — name it, date it, click the map to drop its pin, and choose a folder of photos."
+              : `${ownerName} hasn’t pinned any collections yet.`}
           </p>
         )}
 
@@ -229,7 +256,12 @@ export default function MapView({
       </aside>
 
       {open && (
-        <Slideshow collection={open} onClose={() => setOpenId(null)} onCaptionSaved={handleCaptionSaved} />
+        <Slideshow
+          collection={open}
+          canEdit={isOwner}
+          onClose={() => setOpenId(null)}
+          onCaptionSaved={handleCaptionSaved}
+        />
       )}
     </div>
   );

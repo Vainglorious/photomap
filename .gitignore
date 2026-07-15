@@ -48,3 +48,6 @@ Thumbs.db
 
 # Local photo folders used for ingest testing (never commit photos)
 test-photos/
+
+# Google OAuth client secret file (downloaded from Cloud Console) — never commit
+client_secret_*.json
