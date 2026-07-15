@@ -40,7 +40,9 @@ create table if not exists photos (
   web_url           text not null,          -- 2048px webp shown in the slideshow
   thumb_url         text not null,          -- 400px webp for pins/grids
   caption           text not null default '',
-  "order"           integer not null default 0,
+  -- bigint, not integer: un-numbered photos use Number.MAX_SAFE_INTEGER
+  -- (9007199254740991) as a "sorts last" sentinel, which overflows int4.
+  "order"           bigint not null default 0,
   order_suffix      text not null default '',
   taken_at          timestamptz,            -- EXIF DateTimeOriginal; null if absent
   width             integer not null,

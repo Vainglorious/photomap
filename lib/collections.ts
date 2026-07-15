@@ -28,7 +28,8 @@ interface PhotoRow {
   webUrl: string;
   thumbUrl: string;
   caption: string;
-  order: number;
+  /** Postgres returns bigint as a string; coerced back to a number in toPhoto. */
+  order: string | number;
   orderSuffix: string;
   takenAt: string | null;
   width: number;
@@ -61,7 +62,8 @@ function toPhoto(r: PhotoRow): Photo {
     webUrl: r.webUrl,
     thumbUrl: r.thumbUrl,
     caption: r.caption,
-    order: r.order,
+    // bigint arrives as a string; the value is always <= MAX_SAFE_INTEGER so Number() is lossless.
+    order: Number(r.order),
     orderSuffix: r.orderSuffix,
     takenAt: r.takenAt ? new Date(r.takenAt).toISOString() : null,
     width: r.width,
